@@ -1,20 +1,20 @@
 {
-  "published": "29 Sep 2026 23:01",
-  "retrievedAt": "2026-09-29T15:07:36+00:00",
+  "published": "30 Sep 2026 03:31",
+  "retrievedAt": "2026-09-29T20:01:34+00:00",
   "source": "EMC / NEMS",
   "sourceUrl": "https://www.nems.emcsg.com/en/",
   "metrics": [
     {
       "key": "usep",
       "label": "USEP",
-      "value": 331.56,
+      "value": 245.83,
       "decimals": 2,
       "unit": "S$/MWh"
     },
     {
       "key": "demand",
       "label": "Demand",
-      "value": 7196.0,
+      "value": 6331.0,
       "decimals": 0,
       "unit": "MW"
     },
