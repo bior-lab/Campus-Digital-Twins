@@ -2789,8 +2789,8 @@ function formatBuildingChartLabel(value, period, includeWeekday = false) {
   return formatBuildingChartDate(value, includeWeekday);
 }
 
-function aggregateHistoryBySingaporeDay(rows) {
-  return window.NUSBuildingHistory.aggregate(rows);
+function aggregateHistoryBySingaporeDay(rows, context) {
+  return window.NUSBuildingHistory.aggregate(rows, Date.now(), context);
 }
 
 async function loadBuildingPerformanceHistory(buildingCodes = selectedBuildingCodes()) {
@@ -2816,7 +2816,7 @@ async function loadBuildingMetricHistory(buildingCodes, metric) {
         return payload.points;
       }));
       const rows = window.NUSBuildingHistory.combineComponents(rowSets);
-      const aggregated = aggregateHistoryBySingaporeDay(rows);
+      const aggregated = aggregateHistoryBySingaporeDay(rows, { building, metric });
       buildingPerformanceModel[building][metric] = aggregated;
       state.buildingHistoryLoaded.set(historyKey, Date.now());
       if (aggregated?.latest) buildingPerformanceModel[building].updated = formatTimestamp(aggregated.latest);
@@ -2869,7 +2869,9 @@ function bindBuildingChartInteraction({ chart, width, plot, labels, series, xFor
       const value = item.values[index];
       const compact = formatEnergyCompact(value);
       const exact = compact.includes("MWh") ? `<small>${Math.round(value).toLocaleString("en-SG")} kWh</small>` : "";
-      return `<div><span><i style="--series:${item.model.color}"></i>${item.code}</span><strong>${compact}${exact}</strong></div>`;
+      const correctedCount = (item.corrections || []).filter(correction => correction.date.startsWith(labels[index])).length;
+      const correctionNote = correctedCount ? `<small>${item.code}: ${correctedCount} invalid hourly reading${correctedCount === 1 ? "" : "s"} counted as 0 kWh.</small>` : "";
+      return `<div><span><i style="--series:${item.model.color}"></i>${item.code}</span><strong>${compact}${exact}</strong></div>${correctionNote}`;
     }).join("");
     tooltip.innerHTML = `<header>${formatBuildingChartLabel(labels[index], period, true)}</header>${rows}`;
     tooltip.hidden = false;
@@ -2968,7 +2970,7 @@ function renderBuildingMetricChart(card) {
       const model = buildingPerformanceModel[code];
       const metricData = model?.[metricKey];
       const month = metricData?.monthProfiles?.[chosenMonth];
-      return { code, model, values: period === "monthly" ? month?.values : metricData?.[period], labels: period === "monthly" ? month?.labels : metricData?.[labelKey], sourceStart: metricData?.sourceStart, latest: metricData?.latest };
+      return { code, model, values: period === "monthly" ? month?.values : metricData?.[period], labels: period === "monthly" ? month?.labels : metricData?.[labelKey], sourceStart: metricData?.sourceStart, latest: metricData?.latest, corrections: metricData?.corrections };
     })
     .filter((item) => Array.isArray(item.values));
   const series = selectedSeries.filter((item) => item.values.some((value) => Number.isFinite(value)));

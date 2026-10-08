@@ -18,15 +18,24 @@
     return [...components[0]].filter(([time]) => components.every(component => component.has(time)))
       .map(([t]) => ({ t, v: components.reduce((total, component) => total + component.get(t), 0) }));
   }
-  function aggregate(rows, now = Date.now()) {
+  function aggregate(rows, now = Date.now(), context = {}) {
     const today = singaporeDay(now);
     const valid = normalise(rows).filter(row => singaporeDay(Date.parse(row.t)) < today);
     if (!valid.length) return null;
     const daily = new Map();
     const hourlyCounts = new Map();
+    const corrections = [];
     for (const row of valid) {
       const date = singaporeDay(Date.parse(row.t));
-      daily.set(date, (daily.get(date) || 0) + row.v);
+      let value = row.v;
+      // Verified COM3 API anomaly at 8 Sep 2026, 23:00 SGT. Keep the raw
+      // record for traceability and accept any future non-negative source repair.
+      if (context.building === 'COM3' && context.metric === 'cooling'
+          && row.t === '2026-09-08T15:00:00.000Z' && value < 0) {
+        corrections.push({ t: row.t, date, originalValue: value, replacementValue: 0 });
+        value = 0;
+      }
+      daily.set(date, (daily.get(date) || 0) + value);
       hourlyCounts.set(date, (hourlyCounts.get(date) || 0) + 1);
     }
     const year = today.slice(0, 4);
@@ -49,7 +58,7 @@
     });
     return { monthly: monthProfiles[monthlyMonth].values, monthlyLabels: monthProfiles[monthlyMonth].labels,
       monthlyMonth, availableMonths, monthProfiles, yearly, yearlyLabels,
-      latest: valid.at(-1).t, sourceStart: valid[0].t };
+      latest: valid.at(-1).t, sourceStart: valid[0].t, corrections };
   }
   globalThis.NUSBuildingHistory = { normalise, combineComponents, aggregate };
 })();
