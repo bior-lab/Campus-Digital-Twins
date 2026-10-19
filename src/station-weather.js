@@ -3,6 +3,7 @@
 (function (root) {
   "use strict";
   const HOUR = 3600000, DAY = 24 * HOUR, OFFSET = 8 * HOUR;
+  const SAMPLE_TOLERANCE = 15 * 60000, REFRESH_MS = 5 * 60000;
   const wrapDegrees = value => ((Number(value) % 360) + 360) % 360;
   const humidityPercent = value => Math.min(100, Math.max(0, Number(value) * 10));
   function circularMean(values) {
@@ -35,7 +36,7 @@
   function aggregate(rows, period, now = Date.now(), method = "arithmetic") {
     const localNow = new Date(now + OFFSET);
     const today = Math.floor((now + OFFSET) / DAY) * DAY - OFFSET;
-    const slots = [], buckets = new Map();
+    const slots = [], buckets = new Map(), samples = new Map();
     let start;
     if (period === "yearly") {
       const year = localNow.getUTCFullYear();
@@ -50,15 +51,26 @@
     }
     for (const row of rows) {
       if (row.t < start || row.t > now) continue;
+      if (period === "7d") {
+        const slot = Math.round((row.t + OFFSET) / (3 * HOUR)) * 3 * HOUR - OFFSET;
+        const distance = Math.abs(row.t - slot), previous = samples.get(slot);
+        // Use an actual nearby observation; never interpolate or carry a stale value.
+        if (slot < start || slot > now || distance > SAMPLE_TOLERANCE) continue;
+        if (!previous || distance < Math.abs(previous.t - slot) ||
+            (distance === Math.abs(previous.t - slot) && row.t < previous.t)) samples.set(slot, row);
+        continue;
+      }
       const d = new Date(row.t + OFFSET);
       const key = period === "yearly" ? Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) - OFFSET
-        : period === "30d" ? Math.floor((row.t + OFFSET) / DAY) * DAY - OFFSET : row.t;
-      // Weekly is a sample, not a 3-hour mean. Do not fill a missing sample.
-      if (period === "7d" && ((key + OFFSET) % (3 * HOUR) !== 0)) continue;
+        : Math.floor((row.t + OFFSET) / DAY) * DAY - OFFSET;
       const bucket = buckets.get(key) || [];
       bucket.push(row.v); buckets.set(key, bucket);
     }
     return slots.map(t => {
+      if (period === "7d") {
+        const sample = samples.get(t);
+        return { t, v: sample ? sample.v : null, n: sample ? 1 : 0, observedAt: sample?.t ?? null };
+      }
       const values = buckets.get(t) || [];
       const value = !values.length ? null : method === "circular" ? circularMean(values)
         : values.reduce((a, b) => a + b, 0) / values.length;
@@ -99,6 +111,12 @@
     panel.setAttribute("aria-label", "SDE4 weather station observations");
     panel.hidden = true;
     workspace.querySelector(".weather-analysis-content").append(panel);
+    const refreshVisible = (force = false) => {
+      if (active && !workspace.hidden && document.visibilityState !== "hidden") return load(period, force);
+    };
+    root.setInterval(() => refreshVisible(true), REFRESH_MS);
+    document.addEventListener("visibilitychange", () => refreshVisible());
+    root.addEventListener("focus", () => refreshVisible());
   }
   function select(value) {
     init(); active = value === "sde4";
@@ -118,7 +136,7 @@
   async function load(nextPeriod = period, force = false) {
     init(); period = nextPeriod;
     if (pending) { render(period); return pending; }
-    if (!force && fetchedAt && Date.now() - fetchedAt < 15 * 60000) { render(period); return; }
+    if (!force && fetchedAt && Date.now() - fetchedAt < REFRESH_MS) { render(period); return; }
     records = [];
     pending = (async () => {
       const results = await Promise.allSettled(metrics.map(fetchRange));
@@ -157,16 +175,16 @@
       `<text x="${x(i)}" y="${h - 12}" text-anchor="${i === 0 ? "start" : i === rows.length - 1 ? "end" : "middle"}">${escape(dateLabel(rows[i].t, period === "yearly" ? { day: undefined, year: "numeric" } : {}))}</text>`).join("");
     const dots = rows.map((r, i) => {
       if (r.v === null) return "";
-      const label = `${dateLabel(r.t, period === "7d" ? { hour: "2-digit", minute: "2-digit" } : period === "yearly" ? { day: undefined, year: "numeric" } : {})} SGT · ${number(r.v, metric.digits)} ${metric.unit} · ${period === "7d" ? "3-hour sample" : `mean of ${r.n} available hourly values`}`;
+      const label = `${dateLabel(r.observedAt ?? r.t, period === "7d" ? { hour: "2-digit", minute: "2-digit" } : period === "yearly" ? { day: undefined, year: "numeric" } : {})} SGT · ${number(r.v, metric.digits)} ${metric.unit} · ${period === "7d" ? "3-hour sample" : `mean of ${r.n} available observations`}`;
       return `<circle class="${metric.key}" cx="${x(i)}" cy="${y(r.v)}" r="3"><title>${escape(label)}</title></circle>`;
     }).join("");
     const hits = rows.map((r, i) => {
       if (r.v === null) return "";
       const start = i === 0 ? left : (x(i - 1) + x(i)) / 2;
       const end = i === rows.length - 1 ? w - right : (x(i) + x(i + 1)) / 2;
-      const time = dateLabel(r.t, period === "7d" ? { hour: "2-digit", minute: "2-digit" } : period === "yearly" ? { day: undefined, year: "numeric" } : {});
+      const time = dateLabel(r.observedAt ?? r.t, period === "7d" ? { hour: "2-digit", minute: "2-digit" } : period === "yearly" ? { day: undefined, year: "numeric" } : {});
       const display = metric.key === "wind" ? `${number(r.v, metric.digits)}° ${compass(r.v)}` : `${number(r.v, metric.digits)} ${metric.unit}`;
-      const detail = period === "7d" ? "3-hour sample" : period === "30d" ? `Daily average · ${r.n} hourly values` : `Monthly average · ${r.n} hourly values`;
+      const detail = period === "7d" ? "3-hour sample" : period === "30d" ? `Daily average · ${r.n} observations` : `Monthly average · ${r.n} observations`;
       return `<rect class="weather-chart-hit" tabindex="0" role="img" aria-label="Inspect ${escape(time)}" data-station-hit data-station-time="${escape(time)}" data-station-display="${escape(display)}" data-station-detail="${escape(detail)}" data-station-x="${x(i)}" data-station-y="${y(r.v)}" x="${start}" y="${top}" width="${Math.max(1, end - start)}" height="${h - top - bottom}"></rect>`;
     }).join("");
     return `<svg viewBox="0 0 ${w} ${h}" role="group" aria-label="${escape(metric.name)} ${escape(metric.unit)}"><text class="weather-axis-unit" x="${left}" y="14">${escape(metric.name)} ${escape(metric.unit)}</text><g class="station-grid">${ticks}${labels}</g><path class="station-line ${metric.key}" d="${path}"/>${dots}<line class="weather-hover-line" y1="${top}" y2="${h - bottom}" hidden></line><circle class="weather-hover-dot ${metric.key}" r="5" hidden></circle><g>${hits}</g></svg><div class="weather-chart-tooltip" role="status" hidden data-station-tooltip><header></header><div><span><i class="${metric.key}"></i>${escape(metric.name)}</span><strong></strong></div><small></small></div><p class="weather-chart-note">Source: On-site weather station · Singapore time (SGT)</p>`;

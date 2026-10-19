@@ -7,14 +7,19 @@ status tags and existing typography. Points support hover, keyboard focus and ta
 Each failed range request is retried once before its chart receives an error state.
 
 Source: Building DT `/realtime/range`, four exact SDE4 Weather Station point names.
-Each visit fetches at most four ranges, with shared in-flight requests and a 15-minute
-memory cache. Refresh explicitly reloads. Failed points have individual retryable
-empty states. Data older than three hours is marked delayed per chart, not called live.
+Each load fetches four ranges, with shared in-flight requests and a five-minute
+memory cache. The visible station view refreshes every five minutes and checks for
+expired data when the browser regains focus or visibility. Hidden views do not poll.
+Refresh explicitly reloads. Failed points have individual retryable empty states.
+The update badge and current-condition cards show the source observation timestamps.
 
 - Weekly: current and previous six Singapore calendar days, samples at 00:00,
-  03:00, …, 21:00 SGT; missing samples remain gaps.
-- Monthly: current and previous 29 Singapore calendar days, available-hour daily means.
-- Yearly: current calendar year to date, available-hour monthly means. No future months.
+  03:00, …, 21:00 SGT, selecting the closest actual observation within 15 minutes
+  of each mark (including fractional-second timestamps). Ties prefer the earlier
+  observation. Tooltips show the observation's actual time. Missing samples remain
+  gaps, with no interpolation or carry-forward; future slots are excluded.
+- Monthly: current and previous 29 Singapore calendar days, available-observation daily means.
+- Yearly: current calendar year to date, available-observation monthly means. No future months.
 - Zero is retained; null, blank, nonnumeric, invalid and future timestamps are excluded.
 - Daily/monthly means are not completeness-weighted estimates; today's/current month's
   buckets are partial and each point reports the number of contributing observations.
